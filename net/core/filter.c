@@ -4697,6 +4697,18 @@ static const struct bpf_func_proto bpf_get_socket_cookie_sock_ops_proto = {
 	.arg1_type	= ARG_PTR_TO_CTX,
 };
 
+BPF_CALL_1(bpf_get_socket_cookie_sk_msg, struct sk_msg *, ctx)
+{
+    return ctx->sk ? __sock_gen_cookie(ctx->sk) : 0;
+}
+
+static const struct bpf_func_proto bpf_get_socket_cookie_sk_msg_proto = {
+	.func		= bpf_get_socket_cookie_sk_msg,
+	.gpl_only	= false,
+	.ret_type	= RET_INTEGER,
+	.arg1_type	= ARG_PTR_TO_CTX_OR_NULL,
+};
+
 static u64 __bpf_get_netns_cookie(struct sock *sk)
 {
 	const struct net *net = sk ? sock_net(sk) : &init_net;
@@ -7633,6 +7645,8 @@ sk_msg_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 		return &bpf_sk_storage_delete_proto;
 	case BPF_FUNC_get_netns_cookie:
 		return &bpf_get_netns_cookie_sk_msg_proto;
+	case BPF_FUNC_get_socket_cookie:
+		return &bpf_get_socket_cookie_sk_msg_proto;
 #ifdef CONFIG_CGROUPS
 	case BPF_FUNC_get_current_cgroup_id:
 		return &bpf_get_current_cgroup_id_proto;
