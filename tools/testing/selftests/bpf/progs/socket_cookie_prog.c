@@ -22,9 +22,21 @@ struct {
 } socket_cookies SEC(".maps");
 
 /*
- * These three programs get executed in a row on connect() syscalls. The
- * userspace side of the test creates a client socket, issues a connect() on it
- * and then checks that the local storage associated with this socket has:
+ * Used for testing the sk_msg prog.
+ */
+struct {
+	__uint(type, BPF_MAP_TYPE_SOCKMAP);
+	__uint(max_entries, 2);
+	__type(key, __u32);
+	__type(value, __u64);
+} sock_map SEC(".maps");
+
+/*
+ * The following three programs get executed in a row on connect() syscalls and
+ * the fourth is triggered via sendmsg() after the former three. The userspace
+ * side of the test creates a client socket, issues a connect() and sendmsg()
+ * on it, and then checks that the local storage associated with this socket
+ * has:
  * cookie_value == local_port << 8 | 0xFF
  * The different parts of this cookie_value are appended by those hooks if they
  * all agree on the output of bpf_get_socket_cookie().
@@ -94,6 +106,31 @@ int BPF_PROG(update_cookie_tracing, struct socket *sock,
 	p->cookie_value |= 0xF0;
 
 	return 0;
+}
+
+SEC("sk_msg")
+int set_cookie_skmsg(struct sk_msg_md *msg)
+{
+	struct bpf_sock *sk = msg->sk;
+	int verdict = SK_PASS;
+
+	__u64 cookie;
+	struct socket_cookie *p;
+
+	if (!sk)
+		return SK_DROP;
+
+	p = bpf_sk_storage_get(&socket_cookies, sk, 0,
+			       BPF_SK_STORAGE_GET_F_CREATE);
+	if (!p)
+		return SK_DROP;
+
+	if (p->cookie_key != bpf_get_socket_cookie(msg))
+		return SK_DROP;
+
+	p->cookie_value |= 0xFF;
+
+	return verdict;
 }
 
 char _license[] SEC("license") = "GPL";

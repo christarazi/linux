@@ -17,30 +17,46 @@ struct {
 	__type(value, __u64);
 } sock_hash SEC(".maps");
 
+struct socket_storage_value {
+	__u64 pid;
+	__u64 cookie;
+};
+
 struct {
 	__uint(type, BPF_MAP_TYPE_SK_STORAGE);
 	__uint(map_flags, BPF_F_NO_PREALLOC);
 	__type(key, __u32);
-	__type(value, __u64);
+	__type(value, struct socket_storage_value);
 } socket_storage SEC(".maps");
 
 SEC("sk_msg")
 int prog_msg_verdict(struct sk_msg_md *msg)
 {
 	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+	struct bpf_sock *sk = msg->sk;
 	int verdict = SK_PASS;
+
 	__u32 pid, tpid;
-	__u64 *sk_stg;
+	__u64 cookie, ecookie;
+	struct socket_storage_value *sk_stg;
+
+	if (!sk)
+		return SK_DROP;
 
 	pid = bpf_get_current_pid_tgid() >> 32;
-	sk_stg = bpf_sk_storage_get(&socket_storage, msg->sk, 0, BPF_SK_STORAGE_GET_F_CREATE);
+	cookie = bpf_get_socket_cookie(msg);
+	sk_stg = bpf_sk_storage_get(&socket_storage, sk, 0, BPF_SK_STORAGE_GET_F_CREATE);
 	if (!sk_stg)
 		return SK_DROP;
-	*sk_stg = pid;
+	sk_stg->pid = pid;
+	sk_stg->cookie = cookie;
 	bpf_probe_read_kernel(&tpid , sizeof(tpid), &task->tgid);
 	if (pid != tpid)
 		verdict = SK_DROP;
-	bpf_sk_storage_delete(&socket_storage, (void *)msg->sk);
+	ecookie = sk->cookie;
+	if (cookie != ecookie)
+		verdict = SK_DROP;
+	bpf_sk_storage_delete(&socket_storage, (void *)sk);
 	return verdict;
 }
 
