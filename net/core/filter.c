@@ -8044,6 +8044,11 @@ bool bpf_sock_is_valid_access(int off, int size, enum bpf_access_type type,
 	case offsetof(struct bpf_sock, dst_port):
 	case offsetof(struct bpf_sock, src_port):
 	case offsetof(struct bpf_sock, rx_queue_mapping):
+		break;
+	case bpf_ctx_range(struct bpf_sock, cookie):
+		if (type == BPF_WRITE)
+			return false;
+		return size == sizeof(__u64);
 	case bpf_ctx_range(struct bpf_sock, src_ip4):
 	case bpf_ctx_range_till(struct bpf_sock, src_ip6[0], src_ip6[3]):
 	case bpf_ctx_range(struct bpf_sock, dst_ip4):
@@ -9125,6 +9130,7 @@ u32 bpf_sock_convert_ctx_access(enum bpf_access_type type,
 						    skc_state),
 				       target_size));
 		break;
+
 	case offsetof(struct bpf_sock, rx_queue_mapping):
 #ifdef CONFIG_SOCK_RX_QUEUE_MAPPING
 		*insn++ = BPF_LDX_MEM(
@@ -9141,6 +9147,16 @@ u32 bpf_sock_convert_ctx_access(enum bpf_access_type type,
 		*insn++ = BPF_MOV64_IMM(si->dst_reg, -1);
 		*target_size = 2;
 #endif
+		break;
+
+	case offsetof(struct bpf_sock, cookie):
+		*insn++ = BPF_ATOMIC_LOAD_OP(
+			BPF_FIELD_SIZEOF(struct sock_common, skc_cookie),
+			BPF_XCHG, si->dst_reg, si->src_reg,
+			bpf_target_off(struct sock_common, skc_cookie,
+				       sizeof_field(struct sock_common,
+						    skc_cookie),
+				       target_size));
 		break;
 	}
 
