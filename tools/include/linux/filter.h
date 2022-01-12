@@ -184,13 +184,19 @@
  *   BPF_CMPXCHG              r0 = atomic_cmpxchg(dst_reg + off16, r0, src_reg)
  */
 
-#define BPF_ATOMIC_OP(SIZE, OP, DST, SRC, OFF)			\
+#define _BPF_ATOMIC_OP(SIZE, CODE, OP, DST, SRC, OFF)		\
 	((struct bpf_insn) {					\
-		.code  = BPF_STX | BPF_SIZE(SIZE) | BPF_ATOMIC,	\
+		.code  = CODE | BPF_SIZE(SIZE) | BPF_ATOMIC,	\
 		.dst_reg = DST,					\
 		.src_reg = SRC,					\
 		.off   = OFF,					\
 		.imm   = OP })
+
+#define BPF_ATOMIC_OP(SIZE, OP, DST, SRC, OFF)			\
+	_BPF_ATOMIC_OP(SIZE, BPF_STX, OP, DST, SRC, OFF)
+
+#define BPF_ATOMIC_LOAD_OP(SIZE, OP, DST, SRC, OFF)		\
+	_BPF_ATOMIC_OP(SIZE, BPF_LDX, OP, DST, SRC, OFF)
 
 /* Legacy alias */
 #define BPF_STX_XADD(SIZE, DST, SRC, OFF) BPF_ATOMIC_OP(SIZE, BPF_ADD, DST, SRC, OFF)
