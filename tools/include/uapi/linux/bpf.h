@@ -5538,6 +5538,7 @@ struct bpf_sock {
 	__u32 dst_ip6[4];
 	__u32 state;
 	__s32 rx_queue_mapping;
+	__u64 cookie;           /* read-only */
 };
 
 struct bpf_tcp_sock {

@@ -15,12 +15,17 @@ struct socket_cookie {
 
 void test_socket_cookie(void)
 {
-	int server_fd = 0, client_fd = 0, cgroup_fd = 0, err = 0;
+	int server_fd = 0, client_fd = 0, cgroup_fd = 0, sock_map_fd = 0,
+	    err = 0;
+	const __u32 zero = 0;
 	socklen_t addr_len = sizeof(struct sockaddr_in6);
 	struct socket_cookie_prog *skel;
 	__u32 cookie_expected_value;
 	struct sockaddr_in6 addr;
 	struct socket_cookie val;
+	struct msghdr msg = {0};
+	struct iovec iov = {0};
+	char buf[1];
 
 	skel = socket_cookie_prog__open_and_load();
 	if (!ASSERT_OK_PTR(skel, "skel_open"))
@@ -45,13 +50,38 @@ void test_socket_cookie(void)
 	if (!ASSERT_OK_PTR(skel->links.update_cookie_tracing, "prog_attach"))
 		goto close_cgroup_fd;
 
+	sock_map_fd = bpf_map__fd(skel->maps.sock_map);
+	if (CHECK(sock_map_fd < 0, "map_fd(sock_map)", "errno %d\n", errno))
+		goto close_cgroup_fd;
+
+	/* Attach sk_msg prog to sock_map */
+	if (CHECK(bpf_prog_attach(bpf_program__fd(skel->progs.set_cookie_skmsg),
+				  sock_map_fd, BPF_SK_MSG_VERDICT, 0) < 0,
+		  "prog_attach", "errno %d\n", errno))
+		goto close_sock_map_fd;
+
 	server_fd = start_server(AF_INET6, SOCK_STREAM, "::1", 0, 0);
 	if (CHECK(server_fd < 0, "start_server", "errno %d\n", errno))
-		goto close_cgroup_fd;
+		goto close_sock_map_fd;
 
 	client_fd = connect_to_fd(server_fd, 0);
 	if (CHECK(client_fd < 0, "connect_to_fd", "errno %d\n", errno))
 		goto close_server_fd;
+
+	/* Add client_fd to sock_map */
+	if (CHECK(bpf_map_update_elem(sock_map_fd, &zero, &client_fd, BPF_ANY) <
+			  0,
+		  "map_update(sock_map)", "errno %d\n", errno))
+		goto close_sock_map_fd;
+
+	/* Trigger sk_msg program */
+	iov.iov_base = buf;
+	iov.iov_len = sizeof(buf);
+	msg.msg_iov = &iov;
+	msg.msg_iovlen = 1;
+	if (CHECK(sendmsg(client_fd, &msg, 0) < 0, "sendmsg", "errno %d\n",
+		  errno))
+		goto close_client_fd;
 
 	err = bpf_map_lookup_elem(bpf_map__fd(skel->maps.socket_cookies),
 				  &client_fd, &val);
@@ -69,6 +99,8 @@ close_client_fd:
 	close(client_fd);
 close_server_fd:
 	close(server_fd);
+close_sock_map_fd:
+	close(sock_map_fd);
 close_cgroup_fd:
 	close(cgroup_fd);
 out:
